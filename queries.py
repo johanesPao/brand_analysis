@@ -17,7 +17,8 @@ class Queries:
             loc_brands: str | list[str],
             years: int | list[int] | None = None,
             intra_mode: Literal['IC','NIC'] | None = None,
-            intras_loc: list[str] | None = None
+            intras_loc: list[str] | None = None,
+            in_details: bool = False
         ):
         no_years = years is None
         intra_non_intra = intra_mode is None
@@ -44,7 +45,7 @@ class Queries:
                     sales.{self.tcvs['c_bc']} = items.{self.tcvs['c_bc']}
                 WHERE 
                     sh_room.{self.tcvs['c_brand']} IN {loc_brands_str} AND
-                    -- BAZZAR or BAZAAR are intracompany transaction to Orbit
+                    -- BAZZAR or BAZAAR are intracompany transaction
                     {
                         ''
                         if intra_non_intra
@@ -94,7 +95,7 @@ class Queries:
                     items.{self.tcvs['c_item_product']} item_product,
                     items.{self.tcvs['c_item_group']} item_group,
                     sales.{self.tcvs['c_returned']} returned,
-                    sales.{self.tcvs['c_qty']} sales_quantity,
+                    sales.{self.tcvs['c_qty']} qty,
                     sales.{self.tcvs['c_disc_p']}/100 disc_percent,
                     ABS(sales.{self.tcvs['c_disc_a']}) disc_amount,
                     NULL margin_percent,
@@ -103,10 +104,10 @@ class Queries:
                     ABS(sales.{self.tcvs['c_amt_aft_tax']} + sales.{self.tcvs['c_tax_a']}) srp_per_unit_aft_disc,
                     ABS(sales.{self.tcvs['c_amt_aft_tax']}) srp_per_unit_aft_vat,
                     COALESCE(cogs.{self.tcvs['c_fin_cogs']}, cogs_fallback.{self.tcvs['c_fin_cogs']}, 0) cost_per_unit,
-                    sales.{self.tcvs['c_qty']} * ABS(sales.{self.tcvs['c_b_price']}) total_srp,
-                    sales.{self.tcvs['c_qty']} * ABS(sales.{self.tcvs['c_amt_aft_tax']} + sales.{self.tcvs['c_tax_a']}) total_srp_aft_disc,
-                    sales.{self.tcvs['c_qty']} * ABS(sales.{self.tcvs['c_amt_aft_tax']}) total_srp_aft_vat,
-                    sales.{self.tcvs['c_qty']} * COALESCE(cogs.{self.tcvs['c_fin_cogs']}, cogs_fallback.{self.tcvs['c_fin_cogs']}, 0) total_sales_at_cost
+                    sales.{self.tcvs['c_qty']} * ABS(sales.{self.tcvs['c_b_price']}) retail_tag,
+                    sales.{self.tcvs['c_qty']} * ABS(sales.{self.tcvs['c_amt_aft_tax']} + sales.{self.tcvs['c_tax_a']}) customer_paid,
+                    sales.{self.tcvs['c_qty']} * ABS(sales.{self.tcvs['c_amt_aft_tax']}) net_sales,
+                    sales.{self.tcvs['c_qty']} * COALESCE(cogs.{self.tcvs['c_fin_cogs']}, cogs_fallback.{self.tcvs['c_fin_cogs']}, 0) cost
                 FROM {self.tcvs['t_ret_sales']} sales
                 LEFT JOIN {self.tcvs['t_loc']} sh_room
                 ON
@@ -133,37 +134,45 @@ class Queries:
                     }
                     sales.{self.tcvs['c_receipt_no']} + sales.{self.tcvs['c_bc']} IN (SELECT bon_barcode FROM bon_barcode_list)
             )
-            --SELECT
-            --	*
-            --FROM sales_in_detail
-            --WHERE 
-            --	year='2024' AND 
-            --	month='10'
-            SELECT 
-                channel,
-                ic_or_nic,
-                year,
-                month,
-                item_brand,
-                item_product,
-                item_group,
-                SUM(sales_quantity) qty,
-                SUM(total_sales_at_cost) cost,
-                SUM(total_srp) retail_tag,
-                SUM(total_srp_aft_disc) customer_paid,
-                SUM(total_srp_aft_vat) net_sales
-            FROM sales_in_detail
-            GROUP BY
-                channel,
-                ic_or_nic,
-                year,
-                month,
-                item_brand,
-                item_product,
-                item_group
-            ORDER BY
-                channel DESC,
-                item_brand DESC,
-                year DESC,
-                month DESC
+            {
+                f"""
+                    SELECT
+                    	*
+                    FROM sales_in_detail
+                    ORDER BY
+                        item_brand DESC,
+                        transaction_date DESC,
+                        transaction_time DESC
+                """
+                if in_details
+                else f"""
+                    SELECT 
+                        channel,
+                        ic_or_nic,
+                        year,
+                        month,
+                        item_brand,
+                        item_product,
+                        item_group,
+                        SUM(qty) qty,
+                        SUM(cost) cost,
+                        SUM(retail_tag) retail_tag,
+                        SUM(customer_paid) customer_paid,
+                        SUM(net_sales) net_sales
+                    FROM sales_in_detail
+                    GROUP BY
+                        channel,
+                        ic_or_nic,
+                        year,
+                        month,
+                        item_brand,
+                        item_product,
+                        item_group
+                    ORDER BY
+                        channel DESC,
+                        item_brand DESC,
+                        year DESC,
+                        month DESC
+                """
+            }
         """
